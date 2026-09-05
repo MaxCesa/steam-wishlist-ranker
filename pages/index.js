@@ -1,90 +1,120 @@
-import { useCallback, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import {
+  applyChoice,
+  advance,
+  createRankingState,
+  getCurrentOrder,
+} from "../lib/rankingEngine";
 
-function estimateComparisons(n) {
-  if (n <= 1) return 0;
-  return Math.max(1, Math.round(n * Math.log2(n) - n + 1));
+const STORAGE_KEY = "steam-wishlist-ranker:session";
+
+function saveSession(session) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+  } catch {
+    // localStorage puede fallar (modo privado, cuota, etc.) - no es crítico.
+  }
 }
 
-function shuffle(arr) {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
+function loadSession() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
   }
-  return a;
+}
+
+function clearSession() {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // nada que hacer
+  }
 }
 
 export default function Home() {
-  const [phase, setPhase] = useState("input"); // input | loading | duel | results
+  // input | loading | resume | duel | results
+  const [phase, setPhase] = useState("input");
   const [error, setError] = useState("");
   const [profileInput, setProfileInput] = useState("");
 
-  const [currentPair, setCurrentPair] = useState(null); // {a, b}
-  const [chosenIdx, setChosenIdx] = useState(null); // 0 | 1 | null
-  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [rankState, setRankState] = useState(null);
+  const [currentPair, setCurrentPair] = useState(null);
+  const [chosenIdx, setChosenIdx] = useState(null);
   const [finalGames, setFinalGames] = useState(null);
+  const [showOrderModal, setShowOrderModal] = useState(false);
 
-  const compareResolverRef = useRef(null);
-  const totalGamesRef = useRef(0);
+  const [savedSession, setSavedSession] = useState(null);
 
-  const compare = useCallback((a, b) => {
-    return new Promise((resolve) => {
-      setCurrentPair({ a, b });
-      compareResolverRef.current = resolve;
-    });
+  // Al cargar la página, si hay una sesión guardada (en progreso o
+  // terminada), ofrecemos continuarla en vez de arrancar de cero.
+  useEffect(() => {
+    const saved = loadSession();
+    if (saved && (saved.phase === "duel" || saved.phase === "results")) {
+      setSavedSession(saved);
+      setPhase("resume");
+    }
   }, []);
 
-  const merge = useCallback(
-    async (left, right) => {
-      const result = [];
-      let i = 0;
-      let j = 0;
-      while (i < left.length && j < right.length) {
-        const cmp = await compare(left[i], right[j]);
-        if (cmp <= 0) {
-          result.push(left[i]);
-          i++;
-        } else {
-          result.push(right[j]);
-          j++;
+  // Persistimos automáticamente mientras hay un ranking en progreso o
+  // terminado. No pisamos nada mientras estamos en input/loading/resume.
+  useEffect(() => {
+    if (phase !== "duel" && phase !== "results") return;
+    saveSession({
+      profileInput,
+      phase,
+      rankState: phase === "duel" ? rankState : null,
+      currentPair: phase === "duel" ? currentPair : null,
+      finalGames: phase === "results" ? finalGames : null,
+      savedAt: Date.now(),
+    });
+  }, [phase, rankState, currentPair, finalGames, profileInput]);
+
+  const resumeSaved = () => {
+    if (!savedSession) return;
+    setProfileInput(savedSession.profileInput || "");
+    if (savedSession.phase === "duel") {
+      let state = savedSession.rankState;
+      let pair = savedSession.currentPair;
+      if (!pair && state) {
+        const step = advance(state);
+        state = step.state;
+        pair = step.pair || null;
+        if (step.done) {
+          setFinalGames(step.result);
+          setPhase("results");
+          setSavedSession(null);
+          return;
         }
       }
-      return result.concat(left.slice(i)).concat(right.slice(j));
-    },
-    [compare]
-  );
-
-  const mergeSort = useCallback(
-    async (arr) => {
-      if (arr.length <= 1) return arr;
-      const mid = Math.floor(arr.length / 2);
-      const left = await mergeSort(arr.slice(0, mid));
-      const right = await mergeSort(arr.slice(mid));
-      return merge(left, right);
-    },
-    [merge]
-  );
-
-  const chooseWinner = (idx) => {
-    if (!compareResolverRef.current) return;
-    setChosenIdx(idx);
-    setProgress((p) => ({ ...p, done: Math.min(p.done + 1, p.total) }));
-    setTimeout(() => {
-      const resolve = compareResolverRef.current;
-      compareResolverRef.current = null;
-      setChosenIdx(null);
-      setCurrentPair(null);
-      resolve(idx === 0 ? -1 : 1);
-    }, 180);
+      setRankState(state);
+      setCurrentPair(pair);
+      setPhase("duel");
+    } else {
+      setFinalGames(savedSession.finalGames);
+      setPhase("results");
+    }
+    setSavedSession(null);
   };
 
-  const startRanking = async (games) => {
-    totalGamesRef.current = games.length;
-    setProgress({ done: 0, total: estimateComparisons(games.length) });
+  const discardSaved = () => {
+    clearSession();
+    setSavedSession(null);
+    setPhase("input");
+  };
+
+  const startRanking = (games) => {
+    const initial = createRankingState(games);
+    const step = advance(initial);
+    if (step.done) {
+      setFinalGames(step.result);
+      setPhase("results");
+      return;
+    }
+    setRankState(step.state);
+    setCurrentPair(step.pair);
     setPhase("duel");
-    const sorted = await mergeSort(shuffle(games));
-    setFinalGames(sorted);
-    setPhase("results");
   };
 
   const handleSubmit = async (e) => {
@@ -93,7 +123,9 @@ export default function Home() {
     setError("");
     setPhase("loading");
     try {
-      const res = await fetch(`/api/wishlist?input=${encodeURIComponent(profileInput.trim())}`);
+      const res = await fetch(
+        `/api/wishlist?input=${encodeURIComponent(profileInput.trim())}`,
+      );
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.error || "Error al obtener la wishlist.");
@@ -103,20 +135,45 @@ export default function Home() {
         setPhase("results");
         return;
       }
-      await startRanking(data.games);
+      startRanking(data.games);
     } catch (err) {
       setError(err.message);
       setPhase("input");
     }
   };
 
+  const chooseWinner = (idx) => {
+    if (!currentPair || !rankState) return;
+    setChosenIdx(idx);
+    setTimeout(() => {
+      const applied = applyChoice(rankState, idx === 0);
+      const step = advance(applied);
+      setChosenIdx(null);
+      setCurrentPair(null);
+      setRankState(step.state);
+      if (step.done) {
+        setFinalGames(step.result);
+        setPhase("results");
+      } else {
+        setCurrentPair(step.pair);
+      }
+    }, 180);
+  };
+
   const reset = () => {
+    clearSession();
     setPhase("input");
-    setFinalGames(null);
+    setRankState(null);
     setCurrentPair(null);
+    setFinalGames(null);
     setChosenIdx(null);
+    setShowOrderModal(false);
     setError("");
   };
+
+  const progress = rankState
+    ? { done: rankState.progressDone, total: rankState.progressTotal }
+    : { done: 0, total: 0 };
 
   return (
     <div className="container">
@@ -124,9 +181,9 @@ export default function Home() {
         <div className="intro">
           <h1>VERSUS</h1>
           <p className="sub">
-            Pegá tu perfil de Steam. Vas a ir eligiendo, de a dos, qué juego de tu
-            wishlist preferís, hasta armar el orden real de prioridades.
-            La wishlist tiene que ser pública.
+            Pegá tu perfil de Steam. Vas a ir eligiendo, de a dos, qué juego de
+            tu wishlist preferís, hasta armar el orden real de prioridades. La
+            wishlist tiene que ser pública.
           </p>
           <form onSubmit={handleSubmit}>
             <input
@@ -150,11 +207,41 @@ export default function Home() {
         </div>
       )}
 
+      {phase === "resume" && savedSession && (
+        <div className="intro">
+          <h1>VERSUS</h1>
+          {savedSession.phase === "duel" ? (
+            <p className="sub">
+              Tenés un ranking sin terminar de{" "}
+              <strong>{savedSession.profileInput}</strong> (
+              {savedSession.rankState?.progressDone ?? 0} /{" "}
+              {savedSession.rankState?.progressTotal ?? 0} duelos). ¿Lo
+              continuamos?
+            </p>
+          ) : (
+            <p className="sub">
+              Tenés un ranking terminado de{" "}
+              <strong>{savedSession.profileInput}</strong> guardado. ¿Lo querés
+              ver o empezar uno nuevo?
+            </p>
+          )}
+          <div className="results-actions" style={{ justifyContent: "center" }}>
+            <button className="btn-primary" onClick={resumeSaved}>
+              {savedSession.phase === "duel" ? "Continuar" : "Ver ranking"}
+            </button>
+            <button className="btn-secondary" onClick={discardSaved}>
+              Empezar de nuevo
+            </button>
+          </div>
+        </div>
+      )}
+
       {phase === "duel" && currentPair && (
         <>
           <div className="scoreboard">
             <span className="count">
-              {progress.done.toString().padStart(3, "0")} / {progress.total.toString().padStart(3, "0")}
+              {progress.done.toString().padStart(3, "0")} /{" "}
+              {progress.total.toString().padStart(3, "0")}
             </span>
             <div className="bar">
               <div
@@ -164,8 +251,16 @@ export default function Home() {
                 }}
               />
             </div>
+            <button
+              className="link-btn"
+              onClick={() => setShowOrderModal(true)}
+            >
+              Ver orden actual
+            </button>
           </div>
-
+          <div className="vs-divider">
+            <span>VS</span>
+          </div>
           <div className="duel">
             {[currentPair.a, currentPair.b].map((game, idx) => {
               let cls = "duel-card";
@@ -185,17 +280,25 @@ export default function Home() {
                 </button>
               );
             })}
-            <div className="vs-divider">
-              <span>VS</span>
-            </div>
           </div>
         </>
+      )}
+
+      {phase === "duel" && showOrderModal && rankState && (
+        <OrderModal
+          title="Orden estimado hasta ahora"
+          subtitle="Todavía no terminaste todos los duelos, así que este orden puede cambiar."
+          games={getCurrentOrder(rankState)}
+          onClose={() => setShowOrderModal(false)}
+        />
       )}
 
       {phase === "results" && finalGames && (
         <div className="results">
           <h2>Tu ranking</h2>
-          <p className="sub">{finalGames.length} juegos, de mayor a menor prioridad.</p>
+          <p className="sub">
+            {finalGames.length} juegos, de mayor a menor prioridad.
+          </p>
           {finalGames.map((game, i) => (
             <div className="rank-row" key={game.appid}>
               <div className="rank-num">{i + 1}</div>
@@ -210,6 +313,33 @@ export default function Home() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function OrderModal({ title, subtitle, games, onClose }) {
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <h2>{title}</h2>
+            <p className="sub">{subtitle}</p>
+          </div>
+          <button className="btn-secondary" onClick={onClose}>
+            Cerrar
+          </button>
+        </div>
+        <div className="modal-body">
+          {games.map((game, i) => (
+            <div className="rank-row" key={game.appid}>
+              <div className="rank-num">{i + 1}</div>
+              <img src={game.image} alt="" />
+              <div className="rank-name">{game.name}</div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

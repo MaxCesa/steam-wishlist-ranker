@@ -280,20 +280,29 @@ export default function Home() {
               if (chosenIdx === idx) cls += " chosen";
               if (chosenIdx !== null && chosenIdx !== idx) cls += " rejected";
               return (
-                <button
-                  key={game.appid}
-                  className={cls}
-                  onClick={() => chooseWinner(idx)}
-                  disabled={chosenIdx !== null}
-                  aria-label={`Elegir ${game.name}`}
-                >
-                  <div className="media">
-                    <img src={game.image} alt="" loading="eager" />
-                    <div className="scrim" />
-                  </div>
-                  <div className="name">{game.name}</div>
-                  <div className="key-hint">{idx === 0 ? "←" : "→"}</div>
-                </button>
+                <div className="duel-side" key={game.appid}>
+                  <button
+                    className={cls}
+                    onClick={() => chooseWinner(idx)}
+                    disabled={chosenIdx !== null}
+                    aria-label={`Elegir ${game.name}`}
+                  >
+                    <div className="media">
+                      <img src={game.image} alt="" loading="eager" />
+                      <div className="scrim" />
+                    </div>
+                    <div className="name">{game.name}</div>
+                    <div className="key-hint">{idx === 0 ? "←" : "→"}</div>
+                  </button>
+                  <a
+                    className="steam-link"
+                    href={`https://store.steampowered.com/app/${game.appid}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Ver en Steam ↗
+                  </a>
+                </div>
               );
             })}
             <div className="vs-badge">

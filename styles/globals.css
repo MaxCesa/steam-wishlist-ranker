@@ -194,8 +194,16 @@ button {
   }
 }
 
-.duel-card {
+.duel-side {
   flex: 1;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.duel-card {
+  width: 100%;
   background: #000;
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -203,8 +211,7 @@ button {
   cursor: pointer;
   overflow: hidden;
   position: relative;
-  aspect-ratio: 16 / 9;
-  max-width: 600px;
+  aspect-ratio: 3 / 2;
   transition:
     transform 0.18s ease,
     border-color 0.18s ease,
@@ -292,6 +299,26 @@ button {
 
 .duel-card.side-right .key-hint {
   right: 12px;
+}
+
+.steam-link {
+  display: block;
+  text-align: center;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.steam-link:hover {
+  border-color: var(--gold);
+  color: var(--gold);
 }
 
 .vs-badge {
@@ -490,9 +517,8 @@ button {
     gap: 14px;
   }
 
-  .duel-card {
+  .duel-side {
     max-width: none;
-    aspect-ratio: 16 / 9;
   }
 
   .vs-badge {

@@ -171,6 +171,18 @@ export default function Home() {
     setError("");
   };
 
+  // Atajos de teclado: flecha izq / "1" elige la carta A,
+  // flecha der / "2" elige la carta B.
+  useEffect(() => {
+    if (phase !== "duel" || !currentPair || chosenIdx !== null) return;
+    const onKeyDown = (e) => {
+      if (e.key === "ArrowLeft" || e.key === "1") chooseWinner(0);
+      else if (e.key === "ArrowRight" || e.key === "2") chooseWinner(1);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [phase, currentPair, chosenIdx, rankState]);
+
   const progress = rankState
     ? { done: rankState.progressDone, total: rankState.progressTotal }
     : { done: 0, total: 0 };
@@ -258,12 +270,13 @@ export default function Home() {
               Ver orden actual
             </button>
           </div>
-          <div className="vs-divider">
-            <span>VS</span>
-          </div>
-          <div className="duel">
+
+          <div
+            className="duel"
+            key={`${currentPair.a.appid}-${currentPair.b.appid}`}
+          >
             {[currentPair.a, currentPair.b].map((game, idx) => {
-              let cls = "duel-card";
+              let cls = `duel-card ${idx === 0 ? "side-left" : "side-right"}`;
               if (chosenIdx === idx) cls += " chosen";
               if (chosenIdx !== null && chosenIdx !== idx) cls += " rejected";
               return (
@@ -274,12 +287,18 @@ export default function Home() {
                   disabled={chosenIdx !== null}
                   aria-label={`Elegir ${game.name}`}
                 >
-                  <img src={game.image} alt="" loading="eager" />
+                  <div className="media">
+                    <img src={game.image} alt="" loading="eager" />
+                    <div className="scrim" />
+                  </div>
                   <div className="name">{game.name}</div>
                   <div className="key-hint">{idx === 0 ? "←" : "→"}</div>
                 </button>
               );
             })}
+            <div className="vs-badge">
+              <span>VS</span>
+            </div>
           </div>
         </>
       )}
